@@ -1,8 +1,8 @@
 # SMART-PARKING-SYSTEM-WITH-LICENSE-PLATE-RECOGNITION
 <img width="1343" height="593" alt="image" src="https://github.com/user-attachments/assets/4865ef51-669a-465a-bab9-8fcb26666ff5" />
 ## 👥 Developers
-* **Erhan Özgür Uzun** - 220103018
-* **Bengi Can Bengül** - 220103034
+* **Erhan Özgür Uzun** - 
+* **Bengi Can Bengül** - 
 * **Institution:** Adana Alparslan Türkeş Science and Technology University (ATU)
 
 ## 1. Abstract & Project Overview
