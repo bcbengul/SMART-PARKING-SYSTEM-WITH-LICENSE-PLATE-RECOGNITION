@@ -1,0 +1,42 @@
+// IR Sensör Pinleri
+#define IR1 2
+#define IR2 3
+// Park 1 LED'leri
+#define RED1 8
+#define GREEN1 9
+// Park 2 LED'leri
+#define RED2 10
+#define GREEN2 11
+void setup() {
+pinMode(IR1, INPUT);
+pinMode(IR2, INPUT);
+pinMode(RED1, OUTPUT);
+pinMode(GREEN1, OUTPUT);
+pinMode(RED2, OUTPUT);
+pinMode(GREEN2, OUTPUT);
+// Başlangıç: Her iki park boş kabul edilsin
+digitalWrite(GREEN1, HIGH);
+digitalWrite(RED1, LOW);
+digitalWrite(GREEN2, HIGH);
+digitalWrite(RED2, LOW);
+}
+void loop() {
+int park1 = digitalRead(IR1);
+int park2 = digitalRead(IR2);
+// PARK YERİ 1
+if (park1 == LOW) { // Araç var
+digitalWrite(RED1, HIGH);
+digitalWrite(GREEN1, LOW);
+} else { // Araç yok
+digitalWrite(RED1, LOW);
+digitalWrite(GREEN1, HIGH);
+}
+// PARK YERİ 2
+if (park2 == LOW) { // Araç var
+digitalWrite(RED2, HIGH);
+digitalWrite(GREEN2, LOW);
+} else { // Araç yok
+digitalWrite(RED2, LOW);
+digitalWrite(GREEN2, HIGH);
+}
+}
