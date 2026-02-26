@@ -1,147 +1,82 @@
-import cv2
+# Raspberry Pi 4 + GPIO18 (BCM) üzerinde RPi.GPIO ile SERVO KONTROLÜ
+# Titremeyi azaltmak için: sadece hareket ederken PWM veriyoruz, sonra duty=0.
+
+import RPi.GPIO as GPIO
 import time
-from datetime import datetime, timezone
 
-from config import CAMERA_SOURCE, CAMERA_ID, EVENT_IMAGES_DIR
-from recognizer import recognize_plate_from_frame, PlateRecognitionError
-from file_store import log_event, ensure_dirs, load_authorized_plates
-from servo_control import open_barrier, close_barrier, cleanup as servo_cleanup
+# --- PIN AYARI ---
+
+SERVO_PIN = 18  # BCM 18 -> fiziksel pin 12
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(SERVO_PIN, GPIO.OUT)
+
+# 50 Hz PWM (standart servo frekansı)
+_pwm = GPIO.PWM(SERVO_PIN, 50)
+_pwm.start(0)
+
+# --- AÇI / DUTY AYARI ---
+
+# DİKKAT: Burada yönü ters çeviriyoruz
+# Artık:
+#   CLOSE_ANGLE = "kapı kapalı" açısı
+#   OPEN_ANGLE  = "kapı açık" açısı
+#
+# Öncesinde 0° kapalı, 90° açık gibi düşünmüştük.
+# Senin mekanikte tam tersi çıktığı için burayı tersine çevirdik.
+
+CLOSE_ANGLE = 90   # bariyer KAPALI
+OPEN_ANGLE  = 0    # bariyer AÇIK
 
 
-def main():
-    print("[DEBUG] main() çağrıldı")
-    ensure_dirs()
+def _angle_to_duty(angle: float) -> float:
+    """
+    0–180 dereceyi yaklaşık 2.5–12.5 duty aralığına map eder.
+    Gerekirse küçük oynamalar yapabiliriz.
+    """
+    angle = max(0, min(180, angle))
+    return 2.5 + (angle / 18.0)  # 0° -> 2.5, 90° -> 7.5, 180° -> 12.5
 
-    print("[INFO] Kamera açılıyor...")
-    cap = cv2.VideoCapture(CAMERA_SOURCE)
 
-    # Logitech C310 için çözünürlük
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+def _set_angle(angle: float, wait: float = 0.4):
+    """
+    Verilen açıya gitmesi için servoya kısa süre PWM ver,
+    sonra duty'yi 0 yaparak sinyali kes (jitter azalır).
+    """
+    duty = _angle_to_duty(angle)
+    print(f"[SERVO] angle={angle} duty={duty:.2f}")
+    _pwm.ChangeDutyCycle(duty)
+    time.sleep(wait)          # servo bu sürede hedefe gider
+    _pwm.ChangeDutyCycle(0)   # sinyali kes -> titreme büyük ölçüde biter
 
-    if not cap.isOpened():
-        print("[ERROR] Kamera açılamadı! CAMERA_SOURCE =", CAMERA_SOURCE)
-        return
 
-    print("[INFO] Sistem çalışıyor. Pencereyi kapatmak için 'q' tuşuna bas.")
+def open_barrier():
+    """
+    Bariyeri AÇ (OPEN_ANGLE).
+    (Artık OPEN_ANGLE = 0°, yani daha önceki kapalı açın.)
+    """
+    print("[SERVO] open_barrier()")
+    _set_angle(OPEN_ANGLE)
 
-    # Aynı plakayı sürekli loglamamak / servo’yu sürekli oynatmamak için
-    last_plate = None
-    last_ts = None
 
-    # Yetkili plakalar
-    authorized_set = load_authorized_plates()
-    print(f"[INFO] Yüklenen yetkili plaka sayısı: {len(authorized_set)}")
+def close_barrier():
+    """
+    Bariyeri KAPAT (CLOSE_ANGLE).
+    (Artık CLOSE_ANGLE = 90°, yani mekanikte kapalıya denk gelen açı.)
+    """
+    print("[SERVO] close_barrier()")
+    _set_angle(CLOSE_ANGLE)
 
-    try:
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                print("[WARN] Kare okunamadı, tekrar deneniyor...")
-                continue
 
-            # Varsayılan overlay
-            overlay_text = "No plate"
-            overlay_color = (0, 255, 255)  # sarı
-
-            # Zaman bilgisini bir kez al
-            now = datetime.now(timezone.utc)
-            ts_str = now.isoformat()
-
-            try:
-                result = recognize_plate_from_frame(frame)
-            except PlateRecognitionError as e:
-                print("[ERROR] OpenALPR hata:", e)
-                result = None
-
-            if result:
-                # 1) OpenALPR'ın en iyi tahmini
-                base_plate = (result["plate"] or "").upper()
-                confidence = result["confidence"]
-                candidates = result.get("candidates", []) or []
-
-                # 2) Varsayılan: en iyi tahmin + UNAUTHORIZED
-                final_plate = base_plate
-                status = "UNAUTHORIZED"
-
-                # 3) Adaylar içinde yetkili plaka var mı?
-                for cand in candidates:
-                    cand_plate = (cand.get("plate") or "").upper()
-                    if cand_plate in authorized_set:
-                        final_plate = cand_plate
-                        confidence = cand.get("confidence", confidence)
-                        status = "AUTHORIZED"
-                        break
-
-                # 4) Hâlâ unauthorized ise, en iyi tahmini de kontrol et
-                if status == "UNAUTHORIZED" and final_plate in authorized_set:
-                    status = "AUTHORIZED"
-
-                plate = final_plate or base_plate or ""
-
-                # Aynı plakayı 5 saniye içinde tekrar loglama + servo tetikleme
-                new_event = True
-                if plate and last_plate == plate and last_ts:
-                    diff_sec = (now - last_ts).total_seconds()
-                    if diff_sec < 5:
-                        new_event = False
-
-                if new_event and plate:
-                    last_plate = plate
-                    last_ts = now
-
-                    # Görüntüyü kaydet
-                    safe_ts = ts_str.replace(":", "-").replace(".", "-")
-                    image_filename = f"{safe_ts}_{plate}.jpg"
-                    image_path = f"{EVENT_IMAGES_DIR}/{image_filename}"
-                    cv2.imwrite(image_path, frame)
-
-                    # Event log
-                    log_event(plate, confidence, status, CAMERA_ID, ts_str, image_path)
-
-                    print(
-                        f"[{ts_str}] Camera={CAMERA_ID} Plate={plate} "
-                        f"Conf={confidence:.2f} Status={status}"
-                    )
-
-                    # Sadece YENİ bir AUTHORIZED event olduğunda servo çalışsın
-                    if status == "AUTHORIZED":
-                        print("[INFO] Servo: bariyer açılıyor")
-                        open_barrier()
-                        time.sleep(7.0)  # 2 saniye açık kalsın (isteğe göre değiştir)
-                        print("[INFO] Servo: bariyer kapanıyor")
-                        close_barrier()
-
-                # Overlay text & renk
-                overlay_text = f"{plate} ({status}) {confidence:.1f}%"
-                overlay_color = (0, 255, 0) if status == "AUTHORIZED" else (0, 0, 255)
-
-            # EKRANA GÖRÜNTÜ
-            cv2.putText(
-                frame,
-                overlay_text,
-                (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                overlay_color,
-                2,
-                cv2.LINE_AA,
-            )
-
-            cv2.imshow("Plate Tracker", frame)
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                print("[INFO] 'q' algılandı, çıkılıyor...")
-                break
-
-    except KeyboardInterrupt:
-        print("\n[INFO] Kullanıcı tarafından durduruldu (Ctrl+C).")
-
-    finally:
-        cap.release()
-        cv2.destroyAllWindows()
-        servo_cleanup()
-        print("[INFO] Sistem kapatıldı.")
+def cleanup():
+    """
+    Program biterken PWM ve GPIO temizliği.
+    """
+    print("[SERVO] cleanup()")
+    _pwm.ChangeDutyCycle(0)
+    time.sleep(0.2)
+    _pwm.stop()
+    GPIO.cleanup()
 
 
 if _name_ == "_main_":
