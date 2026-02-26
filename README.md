@@ -3,7 +3,7 @@
 ## 👥 Developers
 * **Erhan Özgür Uzun** - 
 * **Bengi Can Bengül** - 
-* **Institution:** Adana Alparslan Türkeş Science and Technology University (ATU)
+* **Institution:** Adana Alparslan Türkeş Science and Technology University (ATU) - Electrical Electronics Engineering
 
 ## 1. Abstract & Project Overview
 This project is a smart parking system with two parking spots. At the entrance, a USB camera is used to read the vehicle's license plate and the barrier opens for authorized cars. Inside the parking area, the full/empty status of two parking spots is detected using IR sensors and shown with LEDs. If a spot is empty, the green LED turns ON. If it is full, the red LED turns ON.
